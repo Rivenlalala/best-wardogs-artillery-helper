@@ -66,14 +66,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-/// 刻度线：黑色描边 + 纯绿芯，任何游戏背景下都看得见。线体 6px、描边各 2px。
-const LINE_OUTLINE_HALF: i32 = 5;
-const LINE_CORE_HALF: i32 = 3;
-const LINE_COLOR: u32 = 0xFF00_FF00;
+/// 刻度线：黑色描边 + 淡绿芯，比纯绿轻且细，但仍在任何游戏背景下看得见。
+/// 线体 4px、描边各 1px。
+const LINE_OUTLINE_HALF: i32 = 3;
+const LINE_CORE_HALF: i32 = 2;
+/// 注意 G 通道必须是 255（最亮通道），原因见 [`Overlay::draw_number`]。
+const LINE_COLOR: u32 = 0xFFA0_FFA0;
 
-/// 数字用纯绿。GDI 文本与透明黑底混色后 alpha 字节不变，
-/// 纯色通道的混色值恰好能精确反推出预乘 alpha，见 [`Overlay::draw_number`]。
-const NUMBER_COLORREF: COLORREF = COLORREF(0x0000_FF00);
+/// 数字用同样的淡绿。GDI 文本与透明黑底混色后 alpha 字节不变，
+/// 但 G 通道固定为 255（最亮），混色后的 G 字节恰好就是混色比例，
+/// 直接拿它当 alpha，见 [`Overlay::draw_number`]。
+const NUMBER_COLORREF: COLORREF = COLORREF(0x00A0_FFA0);
 const NUMBER_FONT_HEIGHT: i32 = 64;
 
 pub struct Overlay {
@@ -197,7 +200,7 @@ impl Overlay {
     pub fn show_ticks(&mut self, target_mil: f64) {
         self.clear_buffer();
         for (tick_mil, y) in sight::tick_rows(target_mil, 4) {
-            self.draw_rect(TICK_LINE_X0 - 4, TICK_LINE_X1 + 4, y - LINE_OUTLINE_HALF, y + LINE_OUTLINE_HALF, 0xFF00_0000);
+            self.draw_rect(TICK_LINE_X0 - 2, TICK_LINE_X1 + 2, y - LINE_OUTLINE_HALF, y + LINE_OUTLINE_HALF, 0xFF00_0000);
             self.draw_rect(TICK_LINE_X0, TICK_LINE_X1, y - LINE_CORE_HALF, y + LINE_CORE_HALF, LINE_COLOR);
             self.draw_number(y, &format!("{tick_mil:.0}"));
         }
@@ -264,9 +267,10 @@ impl Overlay {
     /// 在刻度线右侧画数字。
     ///
     /// GDI 不认识 alpha：文字与透明黑底混色后，混色比例只留在颜色通道里，
-    /// alpha 字节原样是 0。补救：纯绿字的混色结果里绿通道就是混色比例，
-    /// 直接拿它当 alpha，得到的正好是规范的预乘像素。
-    /// 这就是数字必须用纯色 (0,255,0) 的原因。
+    /// alpha 字节原样是 0。补救：NUMBER_COLORREF 的 G 通道固定为 255，
+    /// 混色后的 G 字节就是混色比例，直接拿它当 alpha，得到的正好是
+    /// 规范的预乘像素。这就是数字颜色必须把 G 定在 255 的原因，
+    /// R/B 可以任意调轻但不能超过 G。
     fn draw_number(&self, line_y: i32, text: &str) {
         let mut utf16: Vec<u16> = text.encode_utf16().collect();
         let mut bounds = RECT {
@@ -292,7 +296,7 @@ impl Overlay {
                 let row = slice::from_raw_parts_mut(self.bits.add((y * self.width) as usize), self.width as usize);
                 for pixel in &mut row[NUMBER_X0.max(0) as usize..NUMBER_X1.min(self.width) as usize] {
                     let blended = *pixel & 0x00FF_FFFF;
-                    let coverage = (blended | blended >> 8 | blended >> 16) & 0xFF;
+                    let coverage = (blended >> 8) & 0xFF;
                     *pixel = (coverage << 24) | blended;
                 }
             }

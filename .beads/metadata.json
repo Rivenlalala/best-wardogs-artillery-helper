@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "autoart",
+  "project_id": "b72e4e11-6345-49a6-a748-b356ae29215c"
+}

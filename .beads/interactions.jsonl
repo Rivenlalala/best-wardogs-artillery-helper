@@ -2,3 +2,4 @@
 {"id":"int-7f246b795c82aff9013d016d03565459","kind":"field_change","created_at":"2026-09-15T03:09:29.205879622Z","actor":"Ruiwen","issue_id":"autoart-3qf.3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-1df60552f2be0d10d6bf1537b82c6d8d","kind":"field_change","created_at":"2026-09-15T03:25:57.773559488Z","actor":"Ruiwen","issue_id":"autoart-3qf.7","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-37f806d487816bd7447393335d5e242f","kind":"field_change","created_at":"2026-09-15T04:19:44.330676051Z","actor":"Ruiwen","issue_id":"autoart-3qf.1","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-a6130b8551dfdc7fdcdbecb36437c19e","kind":"field_change","created_at":"2026-09-15T04:23:57.808338059Z","actor":"Ruiwen","issue_id":"autoart-3qf.2","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}

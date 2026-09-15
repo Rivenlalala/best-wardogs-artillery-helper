@@ -3,6 +3,8 @@
 //! 输入是两个游戏坐标，输出是方位角、距离和火表仰角(MIL)。
 //! 坐标比例尺、武器与弹道弧按游戏内的实际选择作为入参传入。
 
+pub mod hud;
+
 use serde::Deserialize;
 
 /// 游戏坐标单位到米的换算。真实值来自每张地图的 `coordinateMetersPerUnit`，

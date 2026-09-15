@@ -1,0 +1,2 @@
+{"id":"int-f1d89413e9d593045deac907da048071","kind":"field_change","created_at":"2026-09-15T03:08:58.581826078Z","actor":"Ruiwen","issue_id":"autoart-3qf.3","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-7f246b795c82aff9013d016d03565459","kind":"field_change","created_at":"2026-09-15T03:09:29.205879622Z","actor":"Ruiwen","issue_id":"autoart-3qf.3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

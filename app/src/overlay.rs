@@ -22,9 +22,9 @@ impl Overlay {
         Self { native: native::Overlay::create() }
     }
 
-    pub fn show_ticks(&mut self, target_mil: f64) {
+    pub fn show_ticks(&mut self, target_mil: f64, target_azimuth_deg: f64) {
         if let Some(native) = self.native.as_mut() {
-            native.show_ticks(target_mil);
+            native.show_ticks(target_mil, target_azimuth_deg);
         }
     }
 
@@ -45,6 +45,7 @@ impl Overlay {
 mod native {
 use std::slice;
 
+use autoartillery_core::azimuth::{self, NUMBER_Y0, NUMBER_Y1, TICK_LINE_Y0, TICK_LINE_Y1};
 use autoartillery_core::sight::{self, NUMBER_X0, NUMBER_X1, TICK_LINE_X0, TICK_LINE_X1};
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
@@ -196,13 +197,18 @@ impl Overlay {
         }
     }
 
-    /// 显示目标密位 T 的幽灵刻度：四条线 + 右侧数字。
-    pub fn show_ticks(&mut self, target_mil: f64) {
+    /// 显示目标密位 T 与目标方位角的幽灵刻度：密位带四条横线，方位罗盘条五条竖线。
+    pub fn show_ticks(&mut self, target_mil: f64, target_azimuth_deg: f64) {
         self.clear_buffer();
         for (tick_mil, y) in sight::tick_rows(target_mil, 4) {
             self.draw_rect(TICK_LINE_X0 - 2, TICK_LINE_X1 + 2, y - LINE_OUTLINE_HALF, y + LINE_OUTLINE_HALF, 0xFF00_0000);
             self.draw_rect(TICK_LINE_X0, TICK_LINE_X1, y - LINE_CORE_HALF, y + LINE_CORE_HALF, LINE_COLOR);
             self.draw_number(y, &format!("{tick_mil:.0}"));
+        }
+        for (tick_deg, x) in azimuth::tick_columns(target_azimuth_deg, 5) {
+            self.draw_rect(x - LINE_OUTLINE_HALF, x + LINE_OUTLINE_HALF, TICK_LINE_Y0 - 2, TICK_LINE_Y1 + 2, 0xFF00_0000);
+            self.draw_rect(x - LINE_CORE_HALF, x + LINE_CORE_HALF, TICK_LINE_Y0, TICK_LINE_Y1, LINE_COLOR);
+            self.draw_number_at_x(x, &format!("{tick_deg:.0}"));
         }
         self.composite();
     }
@@ -272,13 +278,37 @@ impl Overlay {
     /// 规范的预乘像素。这就是数字颜色必须把 G 定在 255 的原因，
     /// R/B 可以任意调轻但不能超过 G。
     fn draw_number(&self, line_y: i32, text: &str) {
-        let mut utf16: Vec<u16> = text.encode_utf16().collect();
-        let mut bounds = RECT {
+        let bounds = RECT {
             left: NUMBER_X0,
             top: line_y - 2 * NUMBER_FONT_HEIGHT,
             right: NUMBER_X1,
             bottom: line_y + 2 * NUMBER_FONT_HEIGHT,
         };
+        self.draw_text_recovering_alpha(bounds, text);
+    }
+
+    /// 在刻度线上方画数字，水平居中在 `line_x`。用于方位罗盘条——罗盘条是竖线
+    /// 沿 x 排开，跟密位带的横线沿 y 排开正好转了 90 度，所以居中轴也跟着换。
+    fn draw_number_at_x(&self, line_x: i32, text: &str) {
+        let half_width = 2 * NUMBER_FONT_HEIGHT;
+        let bounds = RECT {
+            left: line_x - half_width,
+            top: NUMBER_Y0,
+            right: line_x + half_width,
+            bottom: NUMBER_Y1,
+        };
+        self.draw_text_recovering_alpha(bounds, text);
+    }
+
+    /// GDI 不认识 alpha：文字与透明黑底混色后，混色比例只留在颜色通道里，
+    /// alpha 字节原样是 0。补救：NUMBER_COLORREF 的 G 通道固定为 255，
+    /// 混色后的 G 字节就是混色比例，直接拿它当 alpha，得到的正好是
+    /// 规范的预乘像素。这就是数字颜色必须把 G 定在 255 的原因，
+    /// R/B 可以任意调轻但不能超过 G。
+    fn draw_text_recovering_alpha(&self, mut bounds: RECT, text: &str) {
+        let mut utf16: Vec<u16> = text.encode_utf16().collect();
+        let x0 = bounds.left.max(0) as usize;
+        let x1 = bounds.right.min(self.width) as usize;
         unsafe {
             let previous = SelectObject(self.memory_dc, self.font.into());
             SetBkMode(self.memory_dc, TRANSPARENT);
@@ -294,7 +324,7 @@ impl Overlay {
 
             for y in bounds.top.max(0)..bounds.bottom.min(self.height) {
                 let row = slice::from_raw_parts_mut(self.bits.add((y * self.width) as usize), self.width as usize);
-                for pixel in &mut row[NUMBER_X0.max(0) as usize..NUMBER_X1.min(self.width) as usize] {
+                for pixel in &mut row[x0..x1] {
                     let blended = *pixel & 0x00FF_FFFF;
                     let coverage = (blended >> 8) & 0xFF;
                     *pixel = (coverage << 24) | blended;
@@ -357,7 +387,7 @@ mod native {
             None
         }
 
-        pub fn show_ticks(&mut self, _target_mil: f64) {}
+        pub fn show_ticks(&mut self, _target_mil: f64, _target_azimuth_deg: f64) {}
         pub fn clear(&mut self) {}
         pub fn pump(&self) {}
     }

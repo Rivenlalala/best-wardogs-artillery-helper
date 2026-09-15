@@ -3,6 +3,7 @@
 //! 输入是两个游戏坐标，输出是方位角、距离和火表仰角(MIL)。
 //! 坐标比例尺、武器与弹道弧按游戏内的实际选择作为入参传入。
 
+pub mod azimuth;
 pub mod coords;
 pub mod sight;
 

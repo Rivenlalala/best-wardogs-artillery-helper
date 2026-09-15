@@ -90,8 +90,8 @@ fn format_mil(mil: Mil) -> String {
     }
 }
 
-/// 打印诸元和幽灵刻度的位置，返回幽灵刻度对应的目标密位（无则 None）。
-fn report(weapon: &Weapon, origin: Point, target: Point) -> Option<f64> {
+/// 打印诸元和幽灵刻度的位置，返回幽灵刻度对应的目标密位与方位角（密位无则 None）。
+fn report(weapon: &Weapon, origin: Point, target: Point) -> Option<(f64, f64)> {
     let solution = solve(weapon, origin, target, METERS_PER_UNIT);
     let mut ghost = None;
 
@@ -112,7 +112,7 @@ fn report(weapon: &Weapon, origin: Point, target: Point) -> Option<f64> {
 
         if arc == Arc::Low || arc == Arc::Single {
             let target_mil = mil.target();
-            ghost = Some(target_mil);
+            ghost = Some((target_mil, solution.azimuth_deg));
             let rendered: Vec<String> = sight::tick_rows(target_mil, 4)
                 .iter()
                 .map(|(tick, y)| format!("{tick:.0}@{y}"))
@@ -179,7 +179,9 @@ fn main() {
                     }
                     if let Some((origin, target)) = pair.complete() {
                         match report(weapon, origin, target) {
-                            Some(target_mil) => overlay.show_ticks(target_mil),
+                            Some((target_mil, target_azimuth_deg)) => {
+                                overlay.show_ticks(target_mil, target_azimuth_deg)
+                            }
                             None => overlay.clear(),
                         }
                         println!("\n继续复制以开始新的一对。");

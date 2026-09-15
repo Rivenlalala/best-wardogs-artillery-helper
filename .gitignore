@@ -6,3 +6,6 @@
 .beads/proxieddb/
 
 /target
+
+# T1 探针输出的截图，不入库
+win/capture-frame-*.png

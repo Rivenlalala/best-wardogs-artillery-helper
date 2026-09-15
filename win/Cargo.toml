@@ -1,0 +1,13 @@
+[package]
+name = "autoartillery-win"
+version = "0.1.0"
+edition = "2024"
+
+# 独立 workspace：xcap 在 Linux 上要 libxcb 等系统依赖，
+# 并入 root workspace 会让 Linux 上的 cargo test 失败。
+[workspace]
+
+[dependencies]
+# wgc feature 是必须的。不开启则 xcap 走 GDI/BitBlt，
+# 在 DXGI flip-model 或独占全屏上返回全黑 —— 这正是本探针要排除的失败。
+xcap = { version = "0.9.8", features = ["wgc"] }

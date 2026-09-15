@@ -1,0 +1,14 @@
+/home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/deps/thiserror-e0043a792e7ccd65.d: /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/lib.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/aserror.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/display.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/var.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/private.rs /home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/build/thiserror-ca2fe8c04da0cf64/out/private.rs
+
+/home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/deps/libthiserror-e0043a792e7ccd65.rlib: /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/lib.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/aserror.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/display.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/var.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/private.rs /home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/build/thiserror-ca2fe8c04da0cf64/out/private.rs
+
+/home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/deps/libthiserror-e0043a792e7ccd65.rmeta: /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/lib.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/aserror.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/display.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/var.rs /home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/private.rs /home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/build/thiserror-ca2fe8c04da0cf64/out/private.rs
+
+/home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/lib.rs:
+/home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/aserror.rs:
+/home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/display.rs:
+/home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/var.rs:
+/home/ruiwen/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.20/src/private.rs:
+/home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/build/thiserror-ca2fe8c04da0cf64/out/private.rs:
+
+# env-dep:OUT_DIR=/home/ruiwen/projects/auto-artillery/win/target/x86_64-pc-windows-msvc/release/build/thiserror-ca2fe8c04da0cf64/out

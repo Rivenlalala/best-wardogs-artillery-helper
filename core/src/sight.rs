@@ -22,12 +22,32 @@ pub const TICK_SPACING_PX: f64 = 204.0;
 /// 相邻两条刻度线的密位差。
 pub const TICK_STEP_MIL: f64 = 50.0;
 
+/// 密位带刻度线的水平范围（左闭右开）。实测 40 px 宽。
+pub const TICK_LINE_X0: i32 = 2420;
+pub const TICK_LINE_X1: i32 = 2460;
+
+/// 刻度数字的起始 x。紧跟刻度线右侧。
+pub const NUMBER_X0: i32 = 2480;
+/// 数字绘制框的右界，4 位数在 64px 字高下也放得下。
+pub const NUMBER_X1: i32 = 2660;
+
 /// 某条刻度线在屏幕上的 y。
 ///
 /// 密位带是刚性的：密位越大越靠下，所以 `y(v) = 准星线 + 4.08 * (v - 目标)`。
 /// 目标本身必然落在准星线上（这就是"对齐"的含义）。
 pub fn tick_y(target_mil: f64, tick_mil: f64) -> f64 {
     RETICLE_Y + PX_PER_MIL * (tick_mil - target_mil)
+}
+
+/// 覆盖层要画的 `count` 条幽灵刻度：`(刻度值, 屏幕 y)`。
+///
+/// y 四舍五入到整像素 —— 常数本身是逐像素量出来的，覆盖层不能因为
+/// 半像素取整引入偏差。
+pub fn tick_rows(target_mil: f64, count: usize) -> Vec<(f64, i32)> {
+    nearby_ticks(target_mil, count)
+        .into_iter()
+        .map(|tick_mil| (tick_mil, tick_y(target_mil, tick_mil).round() as i32))
+        .collect()
 }
 
 /// 目标附近的 `count` 条刻度值，对齐到 50 的整数倍。
@@ -116,6 +136,15 @@ mod tests {
         // 正好在整数倍上时不要漂
         assert_eq!(nearby_ticks(550.0, 3), vec![500.0, 550.0, 600.0]);
         assert!(nearby_ticks(550.0, 0).is_empty());
+    }
+
+    /// 覆盖层的最终输入：像素取整后仍要落在实测位置 1px 内。
+    #[test]
+    fn tick_rows_round_without_drifting() {
+        assert_eq!(
+            tick_rows(520.1, 4),
+            vec![(450.0, 794), (500.0, 998), (550.0, 1202), (600.0, 1406)]
+        );
     }
 
     /// 幽灵图案必须把目标夹在中间，否则玩家只有单侧参照，无法判断偏移方向。

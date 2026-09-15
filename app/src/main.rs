@@ -13,6 +13,8 @@ use autoartillery_core::{
     sight, solve,
 };
 
+mod overlay;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// 剪贴板内容在提示里最多显示多少字符。
@@ -88,9 +90,10 @@ fn format_mil(mil: Mil) -> String {
     }
 }
 
-/// 打印诸元和幽灵刻度的位置。
-fn report(weapon: &Weapon, origin: Point, target: Point) {
+/// 打印诸元和幽灵刻度的位置，返回幽灵刻度对应的目标密位（无则 None）。
+fn report(weapon: &Weapon, origin: Point, target: Point) -> Option<f64> {
     let solution = solve(weapon, origin, target, METERS_PER_UNIT);
+    let mut ghost = None;
 
     println!();
     println!("  距离   {:.1} m", solution.distance_m);
@@ -98,7 +101,7 @@ fn report(weapon: &Weapon, origin: Point, target: Point) {
 
     if !solution.in_range {
         println!("  超出射程（{:.0}–{:.0} m）", weapon.min_range_km * 1000.0, weapon.max_range_km * 1000.0);
-        return;
+        return None;
     }
 
     for (label, arc) in [("单弧", Arc::Single), ("低角", Arc::Low), ("高角", Arc::High)] {
@@ -109,14 +112,15 @@ fn report(weapon: &Weapon, origin: Point, target: Point) {
 
         if arc == Arc::Low || arc == Arc::Single {
             let target_mil = mil.target();
-            let ticks = sight::nearby_ticks(target_mil, 4);
-            let rendered: Vec<String> = ticks
+            ghost = Some(target_mil);
+            let rendered: Vec<String> = sight::tick_rows(target_mil, 4)
                 .iter()
-                .map(|tick| format!("{tick:.0}@{:.0}", sight::tick_y(target_mil, *tick)))
+                .map(|(tick, y)| format!("{tick:.0}@{y}"))
                 .collect();
             println!("      幽灵刻度 y = {}", rendered.join("  "));
         }
     }
+    ghost
 }
 
 fn main() {
@@ -152,6 +156,8 @@ fn main() {
 
     let mut pair = Pair::default();
     let mut seen: Option<String> = None;
+    // 建不起来（非 Windows、分辨率不符、Win32 失败）就留在纯命令行模式。
+    let mut overlay = overlay::Overlay::create();
 
     loop {
         if let Ok(text) = clipboard.get_text()
@@ -166,15 +172,23 @@ fn main() {
                             Slot::Target => "目标",
                         };
                         println!("\n{label} = X {:.2}  Y {:.2}", point.x, point.y);
+                        // 新一对开始时旧刻度已失效，不能留着误导下一发。
+                        if slot == Slot::Origin {
+                            overlay.clear();
+                        }
                     }
                     if let Some((origin, target)) = pair.complete() {
-                        report(weapon, origin, target);
+                        match report(weapon, origin, target) {
+                            Some(target_mil) => overlay.show_ticks(target_mil),
+                            None => overlay.clear(),
+                        }
                         println!("\n继续复制以开始新的一对。");
                     }
                 }
                 None => println!("剪贴板内容不是坐标，已忽略：{:?}", preview(&text)),
             }
         }
+        overlay.pump();
         sleep(POLL_INTERVAL);
     }
 }

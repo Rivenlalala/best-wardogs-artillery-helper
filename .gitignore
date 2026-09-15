@@ -5,7 +5,8 @@
 .beads-credential-key
 .beads/proxieddb/
 
-/target
+# 任意层级的构建产物（app/ 是独立 workspace，有自己的 target/）
+target/
 
 # T1 探针输出的截图，不入库
 win/capture-frame-*.png

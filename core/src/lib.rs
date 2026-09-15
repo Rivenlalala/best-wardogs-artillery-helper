@@ -3,7 +3,14 @@
 //! 输入是两个游戏坐标，输出是方位角、距离和火表仰角(MIL)。
 //! 坐标比例尺、武器与弹道弧按游戏内的实际选择作为入参传入。
 
-pub mod hud;
+pub mod coords;
+pub mod sight;
+
+/// 随程序一起编译进去的火表数据。
+///
+/// 放成常量而不是让调用方各自 `include_str!`，是为了让数据文件的位置
+/// 只有本 crate 知道 —— 上层不该关心它叫什么、放在哪。
+pub const SHIPPED_WEAPONS_JSON: &str = include_str!("../data/weapons.json");
 
 use serde::Deserialize;
 

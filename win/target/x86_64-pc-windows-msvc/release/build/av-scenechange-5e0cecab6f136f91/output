@@ -1,3 +1,0 @@
-cargo:rustc-env=PROFILE=release
-cargo:rustc-env=CARGO_CFG_TARGET_FEATURE=cmpxchg16b,fxsr,sse,sse2,sse3
-cargo:rustc-env=CARGO_ENCODED_RUSTFLAGS=-Clinker-flavor=lld-link-Lnative=/home/ruiwen/.cache/cargo-xwin/xwin/crt/lib/x86_64-Lnative=/home/ruiwen/.cache/cargo-xwin/xwin/sdk/lib/um/x86_64-Lnative=/home/ruiwen/.cache/cargo-xwin/xwin/sdk/lib/ucrt/x86_64

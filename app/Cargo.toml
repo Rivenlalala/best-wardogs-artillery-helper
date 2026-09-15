@@ -1,0 +1,12 @@
+[package]
+name = "autoartillery-app"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+autoartillery-core = { path = "../core" }
+# 跨平台剪贴板。Windows 走 Win32，Linux 走 X11/Wayland，
+# 所以同一份代码既能在开发机（WSLg）跑，也能在目标机原生跑。
+arboard = "3"

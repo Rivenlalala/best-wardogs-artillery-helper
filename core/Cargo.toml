@@ -6,7 +6,3 @@ edition = "2024"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[dev-dependencies]
-# 只用来自造合成 HUD 测试夹具（真实字形要从目标机截图里抠）
-font8x8 = "0.3"

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["core"]
-# win/ 是独立 workspace：xcap 在 Linux 上需要 libxcb 等系统依赖，
-# 放进同一个 workspace 会让 root 的 cargo test 在 Linux 上失败。
-exclude = ["win"]
+# app/ 是独立 workspace：它依赖 GUI/剪贴板栈，平台相关，
+# 不并入这里以免 Linux 上的 cargo test 被拖累。
+exclude = ["app"]

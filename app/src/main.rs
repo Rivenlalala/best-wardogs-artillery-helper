@@ -328,9 +328,12 @@ impl eframe::App for Panel {
                 if ui.button("RESET").clicked() {
                     self.session.reset();
                     self.overlay_muted = false;
-                    // 忘掉剪贴板里现在是什么：炮位没挪时玩家会原样再复制一次同一个坐标，
-                    // 去重会把它当旧内容吃掉，原点就再也设不上了。
-                    self.seen = None;
+                    // 剪贴板里现在还是旧目标（玩家还没重新复制）——把它标记为已见，
+                    // 否则下一帧轮询会把这个旧值当成新复制填进原点。真正重复复制
+                    // 同一个坐标的情况仍会被正常接受 —— 那时剪贴板内容已经换回来了。
+                    if let Some(clipboard) = self.clipboard.as_mut() {
+                        self.seen = clipboard.get_text().ok();
+                    }
                     self.status = "copy your position".to_string();
                 }
                 if ui.button("CLEAR OVL").clicked() {

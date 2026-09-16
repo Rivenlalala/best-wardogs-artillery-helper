@@ -26,10 +26,9 @@ pub const TICK_STEP_MIL: f64 = 50.0;
 pub const TICK_LINE_X0: i32 = 2420;
 pub const TICK_LINE_X1: i32 = 2460;
 
-/// 刻度数字的起始 x。紧跟刻度线右侧。
-pub const NUMBER_X0: i32 = 2480;
-/// 数字绘制框的右界，4 位数在 64px 字高下也放得下。
-pub const NUMBER_X1: i32 = 2660;
+/// 幽灵数字的右界：画在刻度线**左侧**，右对齐贴着线。
+/// 游戏自己的数字在线右边（x≈2480 起），分居两侧才不会叠字。
+pub const NUMBER_RIGHT: i32 = TICK_LINE_X0 - 14;
 
 /// 某条刻度线在屏幕上的 y。
 ///

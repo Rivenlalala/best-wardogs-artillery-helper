@@ -24,9 +24,9 @@ pub const TICK_STEP_DEG: f64 = 15.0;
 pub const TICK_LINE_Y0: i32 = 600;
 pub const TICK_LINE_Y1: i32 = 650;
 
-/// 幽灵数字绘制框的垂直范围，紧贴刻度线上方。
-pub const NUMBER_Y0: i32 = 520;
-pub const NUMBER_Y1: i32 = 592;
+/// 幽灵数字的顶边：画在刻度线**下方**。
+/// 游戏自己的罗盘数字在线上方（y≈520..592），上下分开才不会叠字。
+pub const NUMBER_TOP: i32 = TICK_LINE_Y1 + 12;
 
 /// 方位角是环形的：把 `deg` 归一化到 `[0, 360)`。
 fn normalize(deg: f64) -> f64 {

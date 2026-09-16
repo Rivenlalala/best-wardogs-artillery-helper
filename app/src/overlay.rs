@@ -56,14 +56,14 @@ impl Overlay {
 mod native {
 use std::slice;
 
-use autoartillery_core::azimuth::{self, NUMBER_Y0, NUMBER_Y1, TICK_LINE_Y0, TICK_LINE_Y1};
-use autoartillery_core::sight::{self, NUMBER_X0, NUMBER_X1, TICK_LINE_X0, TICK_LINE_X1};
+use autoartillery_core::azimuth::{self, NUMBER_TOP, TICK_LINE_Y0, TICK_LINE_Y1};
+use autoartillery_core::sight::{self, NUMBER_RIGHT, TICK_LINE_X0, TICK_LINE_X1};
 use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BLENDFUNCTION, BITMAPINFO, BITMAPINFOHEADER,
     BI_RGB, CLIP_DEFAULT_PRECIS, CreateCompatibleDC, CreateDIBSection, CreateFontW,
-    DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
+    DEFAULT_CHARSET, DEFAULT_PITCH, DT_CALCRECT, DT_CENTER, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
     DIB_RGB_COLORS, DeleteDC, DeleteObject, DrawTextW, GdiFlush, GetDC, HBITMAP, HDC, HFONT,
     OUT_DEFAULT_PRECIS, ReleaseDC, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
@@ -78,18 +78,24 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-/// 刻度线：黑色描边 + 淡绿芯，比纯绿轻且细，但仍在任何游戏背景下看得见。
-/// 线体 4px、描边各 1px。
-const LINE_OUTLINE_HALF: i32 = 3;
-const LINE_CORE_HALF: i32 = 2;
+/// 刻度线：细芯 + 一圈暗描边，暗边让淡绿在浅色墙面上也不糊。
+/// 线体 2px、描边各 1px。
+const LINE_OUTLINE_HALF: i32 = 2;
+const LINE_CORE_HALF: i32 = 1;
 /// 注意 G 通道必须是 255（最亮通道），原因见 [`Overlay::draw_number`]。
-const LINE_COLOR: u32 = 0xFFA0_FFA0;
+const LINE_COLOR: u32 = 0xFFC8_FFD8;
+/// 描边不用纯黑：60% 的黑更像阴影，不像粗糙的黑框。
+const OUTLINE_COLOR: u32 = 0x9900_0000;
 
-/// 数字用同样的淡绿。GDI 文本与透明黑底混色后 alpha 字节不变，
+/// 数字同色系。GDI 文本与透明黑底混色后 alpha 字节不变，
 /// 但 G 通道固定为 255（最亮），混色后的 G 字节恰好就是混色比例，
-/// 直接拿它当 alpha，见 [`Overlay::draw_number`]。
-const NUMBER_COLORREF: COLORREF = COLORREF(0x00A0_FFA0);
-const NUMBER_FONT_HEIGHT: i32 = 64;
+/// 直接拿它当 alpha，见 [`Overlay::draw_text_recovering_alpha`]。
+const NUMBER_COLORREF: COLORREF = COLORREF(0x00D8_FFC8);
+const NUMBER_FONT_HEIGHT: i32 = 34;
+/// 数字底下垫一层半透明黑“药丸”，任何背景上都读得清。
+const PLATE_ALPHA: u32 = 0x8C;
+const PLATE_PAD_X: i32 = 10;
+const PLATE_PAD_Y: i32 = 4;
 
 pub struct Overlay {
     hwnd: HWND,
@@ -202,12 +208,12 @@ impl Overlay {
     pub fn show_ticks(&mut self, target_mil: f64, target_azimuth_deg: f64) {
         self.clear_buffer();
         for (tick_mil, y) in sight::tick_rows(target_mil, 4) {
-            self.draw_rect(TICK_LINE_X0 - 2, TICK_LINE_X1 + 2, y - LINE_OUTLINE_HALF, y + LINE_OUTLINE_HALF, 0xFF00_0000);
+            self.draw_rect(TICK_LINE_X0 - 2, TICK_LINE_X1 + 2, y - LINE_OUTLINE_HALF, y + LINE_OUTLINE_HALF, OUTLINE_COLOR);
             self.draw_rect(TICK_LINE_X0, TICK_LINE_X1, y - LINE_CORE_HALF, y + LINE_CORE_HALF, LINE_COLOR);
             self.draw_number(y, &format!("{tick_mil:.0}"));
         }
         for (tick_deg, x) in azimuth::tick_columns(target_azimuth_deg, 5) {
-            self.draw_rect(x - LINE_OUTLINE_HALF, x + LINE_OUTLINE_HALF, TICK_LINE_Y0 - 2, TICK_LINE_Y1 + 2, 0xFF00_0000);
+            self.draw_rect(x - LINE_OUTLINE_HALF, x + LINE_OUTLINE_HALF, TICK_LINE_Y0 - 2, TICK_LINE_Y1 + 2, OUTLINE_COLOR);
             self.draw_rect(x - LINE_CORE_HALF, x + LINE_CORE_HALF, TICK_LINE_Y0, TICK_LINE_Y1, LINE_COLOR);
             self.draw_number_at_x(x, &format!("{tick_deg:.0}"));
         }
@@ -261,45 +267,54 @@ impl Overlay {
         }
     }
 
-    /// 在刻度线右侧画数字。
+    /// 在刻度线左侧画密位数字，右边贴着线。游戏自己的数字在线的右边，
+    /// 分居两侧才不会叠字。
+    fn draw_number(&self, line_y: i32, text: &str) {
+        let (width, height) = self.measure(text);
+        self.draw_chip(NUMBER_RIGHT - width, line_y - height / 2, width, height, text);
+    }
+
+    /// 在刻度线下方画方位数字，水平居中在 `line_x`。罗盘条是竖线沿 x 排开，
+    /// 跟密位带的横线沿 y 排开正好转了 90 度，所以居中轴也跟着换；
+    /// 游戏自己的罗盘数字在线上方，幽灵就走下方。
+    fn draw_number_at_x(&self, line_x: i32, text: &str) {
+        let (width, height) = self.measure(text);
+        self.draw_chip(line_x - width / 2, NUMBER_TOP, width, height, text);
+    }
+
+    /// 文本的像素尺寸。药丸底要贴着字，不能拿个固定大框一拍——那正是之前“大而笨”的来源。
+    fn measure(&self, text: &str) -> (i32, i32) {
+        let mut utf16: Vec<u16> = text.encode_utf16().collect();
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe {
+            let previous = SelectObject(self.memory_dc, self.font.into());
+            DrawTextW(
+                self.memory_dc,
+                &mut utf16,
+                &mut rect,
+                DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX,
+            );
+            SelectObject(self.memory_dc, previous);
+        }
+        (rect.right - rect.left, rect.bottom - rect.top)
+    }
+
+    /// 一枚数字“药丸”：半透明暗底 + 淡绿字。
     ///
     /// GDI 不认识 alpha：文字与透明黑底混色后，混色比例只留在颜色通道里，
     /// alpha 字节原样是 0。补救：NUMBER_COLORREF 的 G 通道固定为 255，
     /// 混色后的 G 字节就是混色比例，直接拿它当 alpha，得到的正好是
     /// 规范的预乘像素。这就是数字颜色必须把 G 定在 255 的原因，
     /// R/B 可以任意调轻但不能超过 G。
-    fn draw_number(&self, line_y: i32, text: &str) {
-        let bounds = RECT {
-            left: NUMBER_X0,
-            top: line_y - 2 * NUMBER_FONT_HEIGHT,
-            right: NUMBER_X1,
-            bottom: line_y + 2 * NUMBER_FONT_HEIGHT,
-        };
-        self.draw_text_recovering_alpha(bounds, text);
-    }
-
-    /// 在刻度线上方画数字，水平居中在 `line_x`。用于方位罗盘条——罗盘条是竖线
-    /// 沿 x 排开，跟密位带的横线沿 y 排开正好转了 90 度，所以居中轴也跟着换。
-    fn draw_number_at_x(&self, line_x: i32, text: &str) {
-        let half_width = 2 * NUMBER_FONT_HEIGHT;
-        let bounds = RECT {
-            left: line_x - half_width,
-            top: NUMBER_Y0,
-            right: line_x + half_width,
-            bottom: NUMBER_Y1,
-        };
-        self.draw_text_recovering_alpha(bounds, text);
-    }
-
-    /// GDI 不认识 alpha：文字与透明黑底混色后，混色比例只留在颜色通道里，
-    /// alpha 字节原样是 0。补救：NUMBER_COLORREF 的 G 通道固定为 255，
-    /// 混色后的 G 字节就是混色比例，直接拿它当 alpha，得到的正好是
-    /// 规范的预乘像素。这就是数字颜色必须把 G 定在 255 的原因，
-    /// R/B 可以任意调轻但不能超过 G。
-    fn draw_text_recovering_alpha(&self, mut bounds: RECT, text: &str) {
+    fn draw_chip(&self, x: i32, y: i32, width: i32, height: i32, text: &str) {
         let mut utf16: Vec<u16> = text.encode_utf16().collect();
-        let x0 = bounds.left.max(0) as usize;
-        let x1 = bounds.right.min(self.width) as usize;
+        let mut bounds = RECT { left: x, top: y, right: x + width, bottom: y + height };
+        let plate = RECT {
+            left: bounds.left - PLATE_PAD_X,
+            top: bounds.top - PLATE_PAD_Y,
+            right: bounds.right + PLATE_PAD_X,
+            bottom: bounds.bottom + PLATE_PAD_Y,
+        };
         unsafe {
             let previous = SelectObject(self.memory_dc, self.font.into());
             SetBkMode(self.memory_dc, TRANSPARENT);
@@ -313,12 +328,21 @@ impl Overlay {
             let _ = GdiFlush();
             SelectObject(self.memory_dc, previous);
 
-            for y in bounds.top.max(0)..bounds.bottom.min(self.height) {
-                let row = slice::from_raw_parts_mut(self.bits.add((y * self.width) as usize), self.width as usize);
-                for pixel in &mut row[x0..x1] {
+            let x0 = plate.left.max(0) as usize;
+            let x1 = plate.right.min(self.width) as usize;
+            for row_y in plate.top.max(0)..plate.bottom.min(self.height) {
+                let row = slice::from_raw_parts_mut(self.bits.add((row_y * self.width) as usize), self.width as usize);
+                // 四个角削掉一小块，矩形就不那么硬。
+                let inset = corner_inset(row_y - plate.top, plate.bottom - plate.top);
+                for (offset, pixel) in row[x0..x1].iter_mut().enumerate() {
                     let blended = *pixel & 0x00FF_FFFF;
                     let coverage = (blended >> 8) & 0xFF;
-                    *pixel = (coverage << 24) | blended;
+                    let column = (x0 + offset) as i32;
+                    let inside = column >= plate.left + inset && column < plate.right - inset;
+                    // 字在上、底在下：src-over 的下垫写法，字形本身不受影响，
+                    // 空白处留下半透明黑底。底是纯黑，所以颜色通道不用动。
+                    let backdrop = if inside { PLATE_ALPHA * (255 - coverage) / 255 } else { 0 };
+                    *pixel = ((coverage + backdrop) << 24) | blended;
                 }
             }
         }
@@ -338,6 +362,12 @@ impl Drop for Overlay {
     }
 }
 
+/// 药丸四角的内收像素数：只在最上/最下两行各收一点，一个 3 行的倒角。
+fn corner_inset(row_from_top: i32, plate_height: i32) -> i32 {
+    let from_edge = row_from_top.min(plate_height - 1 - row_from_top);
+    (3 - from_edge).max(0)
+}
+
 /// 数字字体。字形常量按 windows 0.62 的裸 u32 参数传。
 fn number_font() -> HFONT {
     unsafe {
@@ -346,7 +376,7 @@ fn number_font() -> HFONT {
             0,
             0,
             0,
-            600,
+            700,
             0,
             0,
             0,

@@ -66,3 +66,5 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 export.auto: true
+sync:
+    remote: "git@github.com:Rivenlalala/best-wardogs-artillery-helper.git"

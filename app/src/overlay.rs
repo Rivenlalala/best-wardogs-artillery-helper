@@ -12,14 +12,27 @@
 //!   反过来 TRANSPARENT 标志保证鼠标事件照常进游戏。
 //! • 独占全屏下分层窗口画不上 —— 这是对 "只在无边框窗口时可见" 的全部处理。
 
-/// 平台无关的外壳：建不起来就安静退化成空操作，调用方不用关心平台。
+/// 平台无关的外壳：建不起来就退化成空操作，调用方不用关心平台，
+/// 但要把 [`Overlay::warning`] 显示出来 —— 没有控制台了，静默失败等于没告警。
 pub struct Overlay {
     native: Option<native::Overlay>,
+    warning: Option<String>,
 }
 
 impl Overlay {
     pub fn create() -> Self {
-        Self { native: native::Overlay::create() }
+        match native::Overlay::create() {
+            Ok(native) => Self { native: Some(native), warning: None },
+            Err(why) => Self { native: None, warning: Some(why) },
+        }
+    }
+
+    pub fn make_dpi_aware() {
+        native::Overlay::make_dpi_aware();
+    }
+
+    pub fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
     }
 
     pub fn show_ticks(&mut self, target_mil: f64, target_azimuth_deg: f64) {
@@ -34,11 +47,6 @@ impl Overlay {
         }
     }
 
-    pub fn pump(&self) {
-        if let Some(native) = self.native.as_ref() {
-            native.pump();
-        }
-    }
 }
 
 #[cfg(windows)]
@@ -61,8 +69,8 @@ use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetSystemMetrics, MSG, PeekMessageW,
-    PM_REMOVE, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNOACTIVATE, ShowWindow,
+    CreateWindowExW, DefWindowProcW, GetSystemMetrics, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN,
+    SW_SHOWNOACTIVATE, ShowWindow,
     ULW_ALPHA, UpdateLayeredWindow, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST,
     WS_EX_TRANSPARENT, WS_POPUP,
 };
@@ -95,34 +103,24 @@ pub struct Overlay {
 impl Overlay {
     /// 建覆盖层。分辨率不符或 Win32 失败时返回 None（先打印显式警告），
     /// 程序退化为纯命令行模式。
-    pub fn create() -> Option<Self> {
+    /// 必须在任何窗口创建前调用（包括 winit 的），否则显示缩放下坐标被虚拟化，
+    /// 刻度常数按物理像素实测，对不上。旧系统没有 V2 就算了 —— 目标机是 Win10 1703+。
+    pub fn make_dpi_aware() {
         unsafe {
-            // 必须在创建窗口前设置：否则显示缩放下坐标被虚拟化，像素对不上。
-            // 旧系统没有 V2 就算了 —— 目标机是 Win10 1703+。
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
+    }
 
+    pub fn create() -> Result<Self, String> {
         let (width, height) =
             unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+        // 刻度常数按 3840x2160 + 当时 HUD 缩放实测，别的分辨率上位置不可信，
+        // 与其画错不如不画。
         if (width, height) != (3840, 2160) {
-            eprintln!();
-            eprintln!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-            eprintln!("!! 警告：屏幕分辨率 {width}x{height} 不是 3840x2160。");
-            eprintln!("!! 幽灵刻度常数按 3840x2160 + 当时 HUD 缩放实测，在其它");
-            eprintln!("!! 分辨率/缩放下位置不可信，覆盖层不启动，只保留命令行输出。");
-            eprintln!("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-            return None;
+            return Err(format!("no overlay: screen {width}x{height} is not 3840x2160"));
         }
-        println!("刻度常数按 3840x2160 + 当时 HUD 缩放实测；改过 HUD 缩放的话位置不可信。");
-        println!("覆盖层只在游戏为无边框窗口时可见（独占全屏画不上）。");
 
-        match Self::create_window(width, height) {
-            Ok(overlay) => Some(overlay),
-            Err(error) => {
-                eprintln!("覆盖层创建失败（命令行模式继续）：{error}");
-                None
-            }
-        }
+        Self::create_window(width, height).map_err(|error| format!("no overlay: {error}"))
     }
 
     fn create_window(width: i32, height: i32) -> windows::core::Result<Self> {
@@ -217,16 +215,6 @@ impl Overlay {
     pub fn clear(&mut self) {
         self.clear_buffer();
         self.composite();
-    }
-
-    /// 主循环每次轮询剪贴板时顺带泵一次消息，保持窗口消息不积压。
-    pub fn pump(&self) {
-        unsafe {
-            let mut message = MSG::default();
-            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
-                let _ = DispatchMessageW(&message);
-            }
-        }
     }
 
     fn clear_buffer(&mut self) {
@@ -382,13 +370,13 @@ mod native {
     pub struct Overlay;
 
     impl Overlay {
-        pub fn create() -> Option<Self> {
-            println!("此平台没有覆盖层（仅 Windows），只保留命令行输出。");
-            None
+        pub fn make_dpi_aware() {}
+
+        pub fn create() -> Result<Self, String> {
+            Err("no overlay: windows only".to_string())
         }
 
         pub fn show_ticks(&mut self, _target_mil: f64, _target_azimuth_deg: f64) {}
         pub fn clear(&mut self) {}
-        pub fn pump(&self) {}
     }
 }

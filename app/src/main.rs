@@ -1,24 +1,63 @@
-//! 从剪贴板读坐标，解算射击诸元。
+//! 角落控制面板：从剪贴板收坐标，解算射击诸元，驱动屏幕覆盖层。
 //!
 //! 坐标从游戏聊天框复制，格式形如 `x99.01, y110.58`。
-//! 依次复制两次：第一次填原点，第二次填目标。两次都齐了就打印诸元。
-//!
-//! 目前只有命令行输出。屏幕覆盖层是下一步（见 epic 的 autoart-3qf.4）。
+//! 第一次复制填「我的位置」，之后每次复制都是新目标 —— 炮位很少挪，目标一直换。
+//! 换炮位按 RESET。
 
-use std::thread::sleep;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::time::Duration;
 
+use eframe::egui;
+use egui::{Align, Color32, ComboBox, FontId, Layout, RichText, Sense, ViewportCommand};
+
 use autoartillery_core::{
-    Arc, Catalog, METERS_PER_UNIT, Mil, Point, SHIPPED_WEAPONS_JSON, Weapon, coords::parse_point,
-    sight, solve,
+    Arc, Catalog, METERS_PER_UNIT, Mil, Point, SHIPPED_WEAPONS_JSON, Solution, Weapon,
+    coords::parse_point, solve,
 };
 
 mod overlay;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-/// 剪贴板内容在提示里最多显示多少字符。
-const CLIP_PREVIEW_CHARS: usize = 60;
+/// 剪贴板内容在状态行里最多显示多少字符。
+const CLIP_PREVIEW_CHARS: usize = 28;
+
+/// UI 里的一个整体选择：武器 + 弹道弧。玩家心里只有「我在打什么」这一个念头，
+/// 不该逼他先选炮再选弧；core 那边仍然是正交的 Weapon 与 Arc。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum Preset {
+    Mortar,
+    SpgLow,
+    SpgHigh,
+}
+
+impl Preset {
+    const ALL: [Preset; 3] = [Preset::Mortar, Preset::SpgLow, Preset::SpgHigh];
+
+    fn weapon_id(self) -> &'static str {
+        match self {
+            Preset::Mortar => "mortar",
+            Preset::SpgLow | Preset::SpgHigh => "spg",
+        }
+    }
+
+    fn arc(self) -> Arc {
+        match self {
+            Preset::Mortar => Arc::Single,
+            Preset::SpgLow => Arc::Low,
+            Preset::SpgHigh => Arc::High,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Preset::Mortar => "MORTAR",
+            Preset::SpgLow => "SPG · LOW",
+            Preset::SpgHigh => "SPG · HIGH",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Slot {
@@ -26,48 +65,28 @@ enum Slot {
     Target,
 }
 
-impl Default for Slot {
-    fn default() -> Self {
-        Slot::Origin
-    }
-}
-
-/// 依次接收复制到的坐标：第一次填原点，第二次填目标，之后开始新的一对。
-#[derive(Debug, Default)]
-struct Pair {
+/// 收到的坐标落在哪个槽位：原点为空时填原点，否则每次都是新目标。
+#[derive(Debug, Default, PartialEq)]
+struct Session {
     origin: Option<Point>,
     target: Option<Point>,
-    next: Slot,
-    last: Option<Point>,
 }
 
-impl Pair {
-    /// 返回这个点填进了哪个槽位。重复复制同一个点会被忽略。
-    fn submit(&mut self, point: Point) -> Option<Slot> {
-        // 同一点重复复制时忽略，否则手滑复制两次会白占掉目标槽位。
-        if self.last == Some(point) {
-            return None;
+impl Session {
+    fn submit(&mut self, point: Point) -> Slot {
+        if self.origin.is_none() {
+            self.origin = Some(point);
+            return Slot::Origin;
         }
-        self.last = Some(point);
-
-        let slot = self.next;
-        match slot {
-            Slot::Origin => {
-                // 开始新的一对。旧的目标必须一并清掉，否则会用新原点
-                // 配上一个过期的目标，立刻算出一个看起来正常但是错的解。
-                self.origin = Some(point);
-                self.target = None;
-                self.next = Slot::Target;
-            }
-            Slot::Target => {
-                self.target = Some(point);
-                self.next = Slot::Origin;
-            }
-        }
-        Some(slot)
+        self.target = Some(point);
+        Slot::Target
     }
 
-    fn complete(&self) -> Option<(Point, Point)> {
+    fn reset(&mut self) {
+        *self = Session::default();
+    }
+
+    fn pair(&self) -> Option<(Point, Point)> {
         Some((self.origin?, self.target?))
     }
 }
@@ -90,109 +109,258 @@ fn format_mil(mil: Mil) -> String {
     }
 }
 
-/// 打印诸元和幽灵刻度的位置，返回幽灵刻度对应的目标密位与方位角（密位无则 None）。
-fn report(weapon: &Weapon, origin: Point, target: Point) -> Option<(f64, f64)> {
-    let solution = solve(weapon, origin, target, METERS_PER_UNIT);
-    let mut ghost = None;
-
-    println!();
-    println!("  距离   {:.1} m", solution.distance_m);
-    println!("  方位角 {:.1}°", solution.azimuth_deg);
-
-    if !solution.in_range {
-        println!("  超出射程（{:.0}–{:.0} m）", weapon.min_range_km * 1000.0, weapon.max_range_km * 1000.0);
-        return None;
-    }
-
-    for (label, arc) in [("单弧", Arc::Single), ("低角", Arc::Low), ("高角", Arc::High)] {
-        let Some(mil) = solution.mil(arc) else {
-            continue;
-        };
-        println!("  {label}密位 {}", format_mil(mil));
-
-        if arc == Arc::Low || arc == Arc::Single {
-            let target_mil = mil.target();
-            ghost = Some((target_mil, solution.azimuth_deg));
-            let rendered: Vec<String> = sight::tick_rows(target_mil, 4)
-                .iter()
-                .map(|(tick, y)| format!("{tick:.0}@{y}"))
-                .collect();
-            println!("      幽灵刻度 y = {}", rendered.join("  "));
-        }
-    }
-    ghost
+fn format_point(point: Point) -> String {
+    format!("{:.2}, {:.2}", point.x, point.y)
 }
 
-fn main() {
-    let catalog = Catalog::from_json(SHIPPED_WEAPONS_JSON).expect("内置火表必须能解析");
+struct Panel {
+    catalog: Catalog,
+    clipboard: Option<arboard::Clipboard>,
+    seen: Option<String>,
+    session: Session,
+    preset: Preset,
+    status: String,
+    /// CLEAR OVL 按下后为真：诸元照算照显示，只是不往屏幕上画，直到下一个目标到来。
+    overlay_muted: bool,
+    /// 已经画上去的（密位, 方位角）。相同就不重画 —— update 每 200ms 跑一次。
+    drawn: Option<(f64, f64)>,
+    overlay: overlay::Overlay,
+}
 
-    let requested = std::env::args().nth(1);
-    let weapon_id = requested.clone().unwrap_or_else(|| catalog.default.clone());
-    let Some(weapon) = catalog.get(&weapon_id) else {
-        eprintln!(
-            "未知武器 {weapon_id:?}，可用：{}",
-            catalog
-                .weapons
-                .iter()
-                .map(|weapon| weapon.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        std::process::exit(2);
-    };
+impl Panel {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let preset = cc
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "preset"))
+            .unwrap_or(Preset::Mortar);
 
-    let mut clipboard = match arboard::Clipboard::new() {
-        Ok(clipboard) => clipboard,
-        Err(error) => {
-            eprintln!("打不开剪贴板：{error}");
-            std::process::exit(1);
+        let (clipboard, mut status) = match arboard::Clipboard::new() {
+            Ok(clipboard) => (Some(clipboard), "copy your position".to_string()),
+            Err(error) => (None, format!("no clipboard: {error}")),
+        };
+        // 建不起来（非 Windows、分辨率不符、Win32 失败）就只剩面板，不影响读数。
+        let overlay = overlay::Overlay::create();
+        if let Some(warning) = overlay.warning() {
+            status = warning.to_string();
         }
-    };
 
-    println!("武器 {}。在游戏里标记坐标并复制：", weapon.id);
-    println!("  第 1 次复制 -> 我的位置（原点）");
-    println!("  第 2 次复制 -> 目标位置");
-    println!("（同一点重复复制会被忽略）");
+        Self {
+            catalog: Catalog::from_json(SHIPPED_WEAPONS_JSON).expect("内置火表必须能解析"),
+            clipboard,
+            seen: None,
+            session: Session::default(),
+            preset,
+            status,
+            overlay_muted: false,
+            drawn: None,
+            overlay,
+        }
+    }
 
-    let mut pair = Pair::default();
-    let mut seen: Option<String> = None;
-    // 建不起来（非 Windows、分辨率不符、Win32 失败）就留在纯命令行模式。
-    let mut overlay = overlay::Overlay::create();
+    fn weapon(&self) -> &Weapon {
+        self.catalog.get(self.preset.weapon_id()).expect("preset 必须对应内置火表里的武器")
+    }
 
-    loop {
-        if let Ok(text) = clipboard.get_text()
-            && seen.as_deref() != Some(text.as_str())
-        {
-            seen = Some(text.clone());
-            match parse_point(&text) {
-                Some(point) => {
-                    if let Some(slot) = pair.submit(point) {
-                        let label = match slot {
-                            Slot::Origin => "原点",
-                            Slot::Target => "目标",
-                        };
-                        println!("\n{label} = X {:.2}  Y {:.2}", point.x, point.y);
-                        // 新一对开始时旧刻度已失效，不能留着误导下一发。
-                        if slot == Slot::Origin {
-                            overlay.clear();
-                        }
-                    }
-                    if let Some((origin, target)) = pair.complete() {
-                        match report(weapon, origin, target) {
-                            Some((target_mil, target_azimuth_deg)) => {
-                                overlay.show_ticks(target_mil, target_azimuth_deg)
-                            }
-                            None => overlay.clear(),
-                        }
-                        println!("\n继续复制以开始新的一对。");
-                    }
-                }
-                None => println!("剪贴板内容不是坐标，已忽略：{:?}", preview(&text)),
+    fn poll_clipboard(&mut self) {
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            return;
+        };
+        let Ok(text) = clipboard.get_text() else {
+            return;
+        };
+        if self.seen.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        self.seen = Some(text.clone());
+
+        let Some(point) = parse_point(&text) else {
+            self.status = format!("not a coord: {}", preview(&text));
+            return;
+        };
+        match self.session.submit(point) {
+            Slot::Origin => self.status = "origin set · copy a target".to_string(),
+            Slot::Target => {
+                self.status = "target set".to_string();
+                // 新目标的刻度必须画出来，否则上一次 CLEAR OVL 会静默吞掉这一发。
+                self.overlay_muted = false;
             }
         }
-        overlay.pump();
-        sleep(POLL_INTERVAL);
     }
+
+    fn solution(&self) -> Option<Solution> {
+        let (origin, target) = self.session.pair()?;
+        Some(solve(self.weapon(), origin, target, METERS_PER_UNIT))
+    }
+
+    /// 覆盖层永远跟着当前解走：没解、超射程、被静音，都必须是空的 ——
+    /// 屏幕上留着上一个目标的刻度是这个工具最危险的失效方式。
+    fn sync_overlay(&mut self, solution: Option<&Solution>) {
+        let ghost = solution
+            .filter(|solution| solution.in_range && !self.overlay_muted)
+            .and_then(|solution| {
+                Some((solution.mil(self.preset.arc())?.target(), solution.azimuth_deg))
+            });
+        if ghost == self.drawn {
+            return;
+        }
+        self.drawn = ghost;
+        match ghost {
+            Some((target_mil, azimuth_deg)) => self.overlay.show_ticks(target_mil, azimuth_deg),
+            None => self.overlay.clear(),
+        }
+    }
+}
+
+const DIM: Color32 = Color32::from_rgb(120, 132, 140);
+const LIVE: Color32 = Color32::from_rgb(210, 220, 226);
+const ALERT: Color32 = Color32::from_rgb(232, 96, 86);
+
+fn slot_row(ui: &mut egui::Ui, label: &str, point: Option<Point>) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).color(DIM).monospace());
+        match point {
+            Some(point) => ui.label(RichText::new(format_point(point)).color(LIVE).monospace()),
+            None => ui.label(RichText::new("—").color(DIM).monospace()),
+        };
+    });
+}
+
+impl eframe::App for Panel {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "preset", &self.preset);
+    }
+
+    /// 收数与画覆盖层都放在这里：窗口被遮住或最小化时 eframe 不跑 egui pass，
+    /// 只有 logic 照跑。画刻度要是留在 ui 里，面板一被盖住就停在上一个目标上。
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 游戏有焦点时窗口收不到输入事件，必须自己定时醒来读剪贴板。
+        ctx.request_repaint_after(POLL_INTERVAL);
+        self.poll_clipboard();
+        let solution = self.solution();
+        self.sync_overlay(solution.as_ref());
+    }
+
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = root.ctx().clone();
+        let frame = egui::Frame::new()
+            .fill(Color32::from_rgba_unmultiplied(14, 17, 20, 226))
+            .inner_margin(8)
+            .corner_radius(6);
+
+        egui::CentralPanel::default().frame(frame).show(root, |ui| {
+            // 先占整块背景做拖动区，后面画的控件层级更高，点击照样归它们。
+            let background = ui.interact(ui.max_rect(), ui.id().with("drag"), Sense::drag());
+            if background.dragged() {
+                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+            }
+
+            ui.horizontal(|ui| {
+                ComboBox::from_id_salt("preset")
+                    .selected_text(RichText::new(self.preset.label()).color(LIVE).monospace())
+                    .width(120.0)
+                    .show_ui(ui, |ui| {
+                        for preset in Preset::ALL {
+                            ui.selectable_value(&mut self.preset, preset, preset.label());
+                        }
+                    });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.small_button("×").clicked() {
+                        ui.ctx().send_viewport_cmd(ViewportCommand::Close);
+                    }
+                });
+            });
+
+            slot_row(ui, "ME ", self.session.origin);
+            slot_row(ui, "TGT", self.session.target);
+            ui.separator();
+
+            let solution = self.solution();
+            match solution.as_ref() {
+                None => {
+                    ui.label(RichText::new("—").color(DIM).font(FontId::monospace(20.0)));
+                }
+                Some(solution) if !solution.in_range => {
+                    let weapon = self.weapon();
+                    ui.label(RichText::new("OUT OF RANGE").color(ALERT).monospace());
+                    ui.label(
+                        RichText::new(format!(
+                            "{:.0}–{:.0} m · have {:.0} m",
+                            weapon.min_range_km * 1000.0,
+                            weapon.max_range_km * 1000.0,
+                            solution.distance_m
+                        ))
+                        .color(DIM)
+                        .monospace(),
+                    );
+                }
+                Some(solution) => {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("{:.0} m", solution.distance_m))
+                                .color(LIVE)
+                                .monospace(),
+                        );
+                        ui.label(
+                            RichText::new(format!("{:.1}°", solution.azimuth_deg))
+                                .color(LIVE)
+                                .monospace(),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let mil = solution
+                                .mil(self.preset.arc())
+                                .map(format_mil)
+                                .unwrap_or_else(|| "n/a".to_string());
+                            ui.label(
+                                RichText::new(format!("{mil} MIL"))
+                                    .color(LIVE)
+                                    .font(FontId::monospace(20.0)),
+                            );
+                        });
+                    });
+                }
+            }
+
+            ui.horizontal(|ui| {
+                if ui.button("RESET").clicked() {
+                    self.session.reset();
+                    self.overlay_muted = false;
+                    // 忘掉剪贴板里现在是什么：炮位没挪时玩家会原样再复制一次同一个坐标，
+                    // 去重会把它当旧内容吃掉，原点就再也设不上了。
+                    self.seen = None;
+                    self.status = "copy your position".to_string();
+                }
+                if ui.button("CLEAR OVL").clicked() {
+                    self.overlay_muted = true;
+                }
+            });
+            ui.label(RichText::new(&self.status).color(DIM).monospace().size(10.0));
+        });
+    }
+}
+
+fn main() -> eframe::Result {
+    // 必须早于 winit 建窗口：DPI 感知只有进程里第一次设置算数，
+    // 晚了就轮到 winit 定，刻度常数按的物理像素对不上。
+    overlay::Overlay::make_dpi_aware();
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([268.0, 156.0])
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_always_on_top()
+            .with_resizable(false),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "auto-artillery",
+        options,
+        Box::new(|cc| Ok(Box::new(Panel::new(cc)))),
+    )
 }
 
 #[cfg(test)]
@@ -204,40 +372,46 @@ mod tests {
     }
 
     #[test]
-    fn fills_origin_then_target() {
-        let mut pair = Pair::default();
-        assert_eq!(pair.submit(point(1.0, 2.0)), Some(Slot::Origin));
-        assert_eq!(pair.submit(point(3.0, 4.0)), Some(Slot::Target));
-        assert_eq!(pair.complete(), Some((point(1.0, 2.0), point(3.0, 4.0))));
-    }
+    fn first_copy_is_origin_then_every_copy_is_a_new_target() {
+        let mut session = Session::default();
+        assert_eq!(session.submit(point(1.0, 2.0)), Slot::Origin);
+        assert_eq!(session.submit(point(3.0, 4.0)), Slot::Target);
+        assert_eq!(session.pair(), Some((point(1.0, 2.0), point(3.0, 4.0))));
 
-    /// 手滑复制两次同一个点，不该把目标槽位占掉。
-    #[test]
-    fn repeated_copy_of_same_point_is_ignored() {
-        let mut pair = Pair::default();
-        assert_eq!(pair.submit(point(1.0, 2.0)), Some(Slot::Origin));
-        assert_eq!(pair.submit(point(1.0, 2.0)), None, "重复点必须忽略");
-        assert_eq!(pair.complete(), None, "目标还没填");
-        assert_eq!(pair.submit(point(3.0, 4.0)), Some(Slot::Target));
-        assert_eq!(pair.complete(), Some((point(1.0, 2.0), point(3.0, 4.0))));
+        // 炮位不动，只换目标：原点必须粘住。
+        assert_eq!(session.submit(point(5.0, 6.0)), Slot::Target);
+        assert_eq!(session.pair(), Some((point(1.0, 2.0), point(5.0, 6.0))));
     }
 
     #[test]
-    fn starts_a_new_pair_after_completion() {
-        let mut pair = Pair::default();
-        pair.submit(point(1.0, 1.0));
-        pair.submit(point(2.0, 2.0));
-        assert_eq!(pair.complete(), Some((point(1.0, 1.0), point(2.0, 2.0))));
+    fn reset_clears_both_slots_and_the_next_copy_is_the_origin() {
+        let mut session = Session::default();
+        session.submit(point(1.0, 2.0));
+        session.submit(point(3.0, 4.0));
+        session.reset();
+        assert_eq!(session.pair(), None);
+        assert_eq!(session.submit(point(9.0, 9.0)), Slot::Origin, "重置后第一次复制是新炮位");
+        assert_eq!(session.pair(), None, "新炮位不能配上一轮的过期目标");
+    }
 
-        // 第三次复制开始新的一对，旧目标必须被清掉
-        assert_eq!(pair.submit(point(9.0, 9.0)), Some(Slot::Origin));
-        assert_eq!(
-            pair.complete(),
-            None,
-            "新原点不能配上上一轮的过期目标"
-        );
-        assert_eq!(pair.submit(point(8.0, 8.0)), Some(Slot::Target));
-        assert_eq!(pair.complete(), Some((point(9.0, 9.0), point(8.0, 8.0))));
+    #[test]
+    fn presets_resolve_to_a_shipped_weapon_and_an_arc_that_has_a_table() {
+        let catalog = Catalog::from_json(SHIPPED_WEAPONS_JSON).unwrap();
+        for preset in Preset::ALL {
+            let weapon = catalog.get(preset.weapon_id()).expect("preset 指向的武器必须存在");
+            let mid_km = (weapon.min_range_km + weapon.max_range_km) / 2.0;
+            let solution = solve(
+                weapon,
+                point(0.0, 0.0),
+                point(mid_km * 1000.0 / METERS_PER_UNIT, 0.0),
+                METERS_PER_UNIT,
+            );
+            assert!(
+                solution.mil(preset.arc()).is_some(),
+                "{:?} 在射程中点必须有密位",
+                preset
+            );
+        }
     }
 
     /// 原点与目标相同是无效输入，不能悄悄算出一个零距离的解。

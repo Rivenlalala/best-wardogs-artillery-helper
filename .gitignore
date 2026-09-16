@@ -13,3 +13,10 @@ win/capture-frame-*.png
 
 # 游戏截图（大文件 + 游戏内容，不入库）
 Wardogs Screenshot*.png
+
+# 参考实现（只读，本地克隆，不入库）
+reference/
+
+# 构建产物（交付给 Windows 机器，不入库）
+*.exe
+*:Zone.Identifier

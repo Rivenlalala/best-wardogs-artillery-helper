@@ -10,6 +10,8 @@ autoartillery-core = { path = "../core" }
 # 跨平台剪贴板。Windows 走 Win32，Linux 走 X11/Wayland，
 # 所以同一份代码既能在开发机（WSLg）跑，也能在目标机原生跑。
 arboard = "3"
+eframe = { version = "0.36.2", default-features = false, features = ["persistence", "glow", "default_fonts", "wayland", "x11"] }
+serde = { version = "1.0.229", features = ["derive"] }
 
 [target."cfg(windows)".dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
